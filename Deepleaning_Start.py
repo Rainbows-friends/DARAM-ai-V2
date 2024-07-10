@@ -1,5 +1,4 @@
 import os
-
 import keras
 import numpy as np
 import cv2
@@ -8,11 +7,17 @@ from keras._tf_keras.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, D
 from keras._tf_keras.keras.utils import to_categorical
 from keras._tf_keras.keras.callbacks import EarlyStopping, ModelCheckpoint
 from sklearn.model_selection import train_test_split
+import tkinter as tk
+from tkinter import ttk
+import threading
 
-KNOWN_FACES_DIR = 'C:\\Faceon_Project\\DTFO_Taeeun\\known_faces'
-NON_FACES_DIR = 'C:\\Faceon_Project\\DTFO_Taeeun\\non_faces'
+KNOWN_FACES_DIR = 'C:\\DARAM-ai-V2\\knows_faces'
+NON_FACES_DIR = 'C:\\DARAM-ai-V2\\knows_faces'
+current_dir = ""
 
 def load_images_from_folder(folder, label):
+    global current_dir
+    current_dir = folder
     images = []
     labels = []
     for filename in os.listdir(folder):
@@ -23,6 +28,41 @@ def load_images_from_folder(folder, label):
             images.append(img)
             labels.append(label)
     return images, labels
+
+def create_training_window():
+    window = tk.Tk()
+    window.title("Training Progress")
+    window.geometry("600x200")
+
+    progress_var = tk.DoubleVar()
+    progress_bar = ttk.Progressbar(window, length=500, mode='determinate', variable=progress_var)
+    progress_bar.pack(pady=20)
+
+    epoch_label = tk.Label(window, text="Epoch: 0")
+    epoch_label.pack()
+    loss_label = tk.Label(window, text="Loss: 0.0000, Accuracy: 0.0000")
+    loss_label.pack()
+    val_loss_label = tk.Label(window, text="Val Loss: 0.0000, Val Accuracy: 0.0000")
+    val_loss_label.pack()
+    current_dir_label = tk.Label(window, text="Current Directory: None")
+    current_dir_label.pack()
+
+    def update_progress(epoch, logs):
+        progress_var.set((epoch + 1) / 20 * 100)
+        epoch_label.config(text=f"Epoch: {epoch + 1}")
+        loss_label.config(text=f"Loss: {logs['loss']:.4f}, Accuracy: {logs['accuracy']:.4f}")
+        val_loss_label.config(text=f"Val Loss: {logs['val_loss']:.4f}, Val Accuracy: {logs['val_accuracy']:.4f}")
+        current_dir_label.config(text=f"Current Directory: {current_dir}")
+
+    def on_train_end(logs=None):
+        window.destroy()
+
+    callback = keras.callbacks.LambdaCallback(on_epoch_end=update_progress, on_train_end=on_train_end)
+
+    thread = threading.Thread(target=window.mainloop)
+    thread.start()
+
+    return callback
 
 known_images = []
 known_labels = []
@@ -36,13 +76,11 @@ for label, face_dir in enumerate(registered_faces):
     known_images.extend(images)
     known_labels.extend(labels)
 
-non_face_images, non_face_labels = load_images_from_folder(NON_FACES_DIR, len(registered_faces))
-
-all_images = known_images + non_face_images
-all_labels = known_labels + non_face_labels
+all_images = known_images
+all_labels = known_labels
 
 all_images = np.array(all_images)
-all_labels = to_categorical(np.array(all_labels), num_classes=len(registered_faces) + 1)
+all_labels = to_categorical(np.array(all_labels), num_classes=len(registered_faces))
 
 X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
 
@@ -62,14 +100,10 @@ model = Sequential([
     Flatten(),
     Dense(512, activation='relu'),
     Dropout(0.5),
-    Dense(len(registered_faces) + 1, activation='softmax')
+    Dense(len(registered_faces), activation='softmax')
 ])
 
 model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-
-class TrainingProgressCallback(keras._tf_keras.keras.callbacks.Callback):
-    def on_epoch_end(self, epoch, logs=None):
-        print(f"Epoch {epoch + 1}/{10} - loss: {logs['loss']:.4f} - accuracy: {logs['accuracy']:.4f} - val_loss: {logs['val_loss']:.4f} - val_accuracy: {logs['val_accuracy']:.4f}")
 
 if os.path.exists('face_recognition_model.keras'):
     os.remove('face_recognition_model.keras')
@@ -77,18 +111,19 @@ if os.path.exists('face_recognition_model.keras'):
 early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
 model_checkpoint = ModelCheckpoint('best_face_recognition_model.keras', save_best_only=True, monitor='val_loss')
 
-model.fit(X_train, y_train, epochs=10, validation_data=(X_test, y_test), callbacks=[TrainingProgressCallback(), early_stopping, model_checkpoint])
+training_callback = create_training_window()
+
+model.fit(X_train, y_train, epochs=20, validation_data=(X_test, y_test), callbacks=[training_callback, early_stopping, model_checkpoint])
 
 model.save('face_recognition_model.keras')
 print("모델 저장 완료: face_recognition_model.keras")
 
-# 모델 검증
 predictions = model.predict(X_test)
 predicted_labels = np.argmax(predictions, axis=1)
 true_labels = np.argmax(y_test, axis=1)
 
 print("테스트 셋에서의 정확도: ", np.mean(predicted_labels == true_labels))
-for i in range(10):  # 테스트 셋에서 일부 샘플을 출력
+for i in range(10):
     true_label = label_mapping.get(true_labels[i], "Unknown")
     predicted_label = label_mapping.get(predicted_labels[i], "Unknown")
     print(f"실제 라벨: {true_label}, 예측 라벨: {predicted_label}")
