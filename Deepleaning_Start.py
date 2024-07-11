@@ -1,32 +1,41 @@
 import os
-import keras
-import numpy as np
-import cv2
-from keras._tf_keras.keras.models import Sequential
-from keras._tf_keras.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
-from keras._tf_keras.keras.utils import to_categorical
-from keras._tf_keras.keras.callbacks import EarlyStopping, ModelCheckpoint
-from sklearn.model_selection import train_test_split
+import json
+import random
+import threading
 import tkinter as tk
 from tkinter import ttk
-import threading
+
+import cv2
+import keras
+import numpy as np
+from keras._tf_keras.keras import Sequential
+from keras._tf_keras.keras.callbacks import EarlyStopping, ModelCheckpoint
+from keras._tf_keras.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
+from keras._tf_keras.keras.preprocessing.image import ImageDataGenerator
+from keras._tf_keras.keras.utils import to_categorical
+from sklearn.model_selection import train_test_split
 
 KNOWN_FACES_DIR = 'C:\\DARAM-ai-V2\\knows_faces'
-NON_FACES_DIR = 'C:\\DARAM-ai-V2\\knows_faces'
 current_dir = ""
 
-def load_images_from_folder(folder, label):
+def load_images_from_folder(folder, label=None, sample_size=None):
     global current_dir
     current_dir = folder
     images = []
     labels = []
-    for filename in os.listdir(folder):
+    file_list = os.listdir(folder)
+
+    if sample_size is not None and len(file_list) > sample_size:
+        file_list = random.sample(file_list, sample_size)
+
+    for filename in file_list:
         img_path = os.path.join(folder, filename)
         img = cv2.imread(img_path)
         if img is not None:
             img = cv2.resize(img, (128, 128))
             images.append(img)
-            labels.append(label)
+            if label is not None:
+                labels.append(label)
     return images, labels
 
 def create_training_window():
@@ -64,25 +73,37 @@ def create_training_window():
 
     return callback
 
-known_images = []
-known_labels = []
+all_images = []
+all_labels = []
+valid_classes = []
 label_mapping = {}
-registered_faces = [d for d in os.listdir(KNOWN_FACES_DIR) if d.isdigit()]
 
-for label, face_dir in enumerate(registered_faces):
-    label_mapping[label] = face_dir
+# Load known faces
+for label, face_dir in enumerate(os.listdir(KNOWN_FACES_DIR)):
     face_path = os.path.join(KNOWN_FACES_DIR, face_dir)
-    images, labels = load_images_from_folder(face_path, label)
-    known_images.extend(images)
-    known_labels.extend(labels)
+    if face_dir == 'Other' or len(os.listdir(face_path)) < 200:
+        continue
+    valid_classes.append(face_dir)
+    label_mapping[len(valid_classes)-1] = face_dir
+    images, labels = load_images_from_folder(face_path, len(valid_classes)-1)
+    all_images.extend(images)
+    all_labels.extend(labels)
 
-all_images = known_images
-all_labels = known_labels
-
+num_classes = len(valid_classes)
 all_images = np.array(all_images)
-all_labels = to_categorical(np.array(all_labels), num_classes=len(registered_faces))
+all_labels = to_categorical(np.array(all_labels), num_classes=num_classes)
 
 X_train, X_test, y_train, y_test = train_test_split(all_images, all_labels, test_size=0.2, random_state=42)
+
+datagen = ImageDataGenerator(
+    rotation_range=20,
+    width_shift_range=0.2,
+    height_shift_range=0.2,
+    shear_range=0.2,
+    zoom_range=0.2,
+    horizontal_flip=True,
+    fill_mode='nearest'
+)
 
 model = Sequential([
     Conv2D(32, (3, 3), activation='relu', input_shape=(128, 128, 3)),
@@ -100,30 +121,33 @@ model = Sequential([
     Flatten(),
     Dense(512, activation='relu'),
     Dropout(0.5),
-    Dense(len(registered_faces), activation='softmax')
+    Dense(num_classes, activation='softmax')
 ])
 
 model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
-if os.path.exists('face_recognition_model.keras'):
-    os.remove('face_recognition_model.keras')
-
 early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
-model_checkpoint = ModelCheckpoint('best_face_recognition_model.keras', save_best_only=True, monitor='val_loss')
+model_checkpoint = ModelCheckpoint('best_face_recognition_model_no_other_non_faces.keras', save_best_only=True, monitor='val_loss')
 
 training_callback = create_training_window()
 
-model.fit(X_train, y_train, epochs=20, validation_data=(X_test, y_test), callbacks=[training_callback, early_stopping, model_checkpoint])
+model.fit(datagen.flow(X_train, y_train, batch_size=32), epochs=20, validation_data=(X_test, y_test),
+          callbacks=[training_callback, early_stopping, model_checkpoint])
 
-model.save('face_recognition_model.keras')
-print("모델 저장 완료: face_recognition_model.keras")
+model.save('face_recognition_model_no_other_non_faces.keras')
+print("모델 저장 완료: face_recognition_model_no_other_non_faces.keras")
 
+# Save the label mapping to a JSON file
+with open('label_mapping_no_other_non_faces.json', 'w') as f:
+    json.dump(label_mapping, f)
+
+# 모델 검증
 predictions = model.predict(X_test)
 predicted_labels = np.argmax(predictions, axis=1)
 true_labels = np.argmax(y_test, axis=1)
 
 print("테스트 셋에서의 정확도: ", np.mean(predicted_labels == true_labels))
 for i in range(10):
-    true_label = label_mapping.get(true_labels[i], "Unknown")
-    predicted_label = label_mapping.get(predicted_labels[i], "Unknown")
+    true_label = true_labels[i]
+    predicted_label = predicted_labels[i]
     print(f"실제 라벨: {true_label}, 예측 라벨: {predicted_label}")

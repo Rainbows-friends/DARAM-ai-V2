@@ -1,13 +1,13 @@
 import os
-import numpy as np
 import cv2
-from keras._tf_keras.keras.models import load_model
+import numpy as np
 from deepface import DeepFace
+from keras._tf_keras.keras.models import load_model
 
-KNOWN_FACES_DIR = 'C:\\Faceon_Project\\DTFO_Taeeun\\known_faces'
-MODEL_PATH_DET = 'C:\\Faceon_Project\\DARAM-AI(Deepface)\\test\\face_detection_model_test.keras'
-MODEL_PATH_REC = 'C:\\Faceon_Project\\DARAM-AI(Deepface)\\test\\face_recognition_model_test.keras'
-LOG_FILE_PATH = 'C:\\Faceon_Project\\DARAM-AI(Deepface)\\log.txt'
+KNOWN_FACES_DIR = r'C:\DARAM-ai-V2\knows_faces'
+MODEL_PATH_DET = r'C:\DARAM-ai-V2\test\face_detection_model_test.keras'
+MODEL_PATH_REC = r'C:\DARAM-ai-V2\test\face_recognition_model_test.keras'
+LOG_FILE_PATH = r'C:\DARAM-ai-V2\log.txt'
 
 # 라벨 매핑 로드
 label_mapping = {}
@@ -64,7 +64,7 @@ def run_face_recognition():
             if not ret:
                 break
 
-            frame = cv2.flip(frame, 1)  # 좌우 반전
+            frame = cv2.flip(frame, 1)
             frame = detect_and_classify_faces(frame, detection_model, recognition_model, log_file)
             cv2.imshow('Face Recognition', frame)
 
